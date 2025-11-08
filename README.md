@@ -96,7 +96,9 @@ ngrok http 8501
 
 Copy the forwarding URL and share it with remote users. The app also includes an in-app “Start ngrok” button (requires `pyngrok`).
 
-## 📚 Citation
+Live demo (temporary ngrok tunnel): [https://prewilling-arie-cozily.ngrok-free.dev/](https://prewilling-arie-cozily.ngrok-free.dev/)
+
+## Citation
 If you use this repository, please cite the associated HyperDyG work (update with final bibliographic entry):
 
 ```
