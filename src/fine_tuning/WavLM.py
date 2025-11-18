@@ -8,7 +8,7 @@ from transformers import WavLMModel
 from torch.utils.data import Dataset
 
 class AudioEmbeddingModel(nn.Module):
-    def __init__(self, embedding_dim=1024, projection_dim=512, pretrained_model="microsoft/wavlm-large"):
+    def __init__(self, embedding_dim=768, projection_dim=512, pretrained_model="microsoft/wavlm-base"):
         super().__init__()
         self.wavlm = WavLMModel.from_pretrained(pretrained_model)
         self.projection = nn.Sequential(

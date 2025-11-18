@@ -1,0 +1,1 @@
+# The pickcle file which contain the feature embedding of 2 modalities are saved in here.

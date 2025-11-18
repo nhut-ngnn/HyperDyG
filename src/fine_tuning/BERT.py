@@ -7,9 +7,9 @@ import pickle
 import numpy as np
 
 class BERTEmbeddingModel(nn.Module):
-    def __init__(self, embedding_dim=1024, projection_dim=512):
+    def __init__(self, embedding_dim=768, projection_dim=512):
         super().__init__()
-        self.bert = BertModel.from_pretrained('bert-large-uncased')
+        self.bert = BertModel.from_pretrained('bert-base-uncased')
         self.project = nn.Sequential(
             nn.Linear(embedding_dim, embedding_dim),
             nn.ReLU(),
@@ -18,7 +18,9 @@ class BERTEmbeddingModel(nn.Module):
 
     def forward(self, input_ids, attention_mask):
         output = self.bert(input_ids, attention_mask=attention_mask)
-        pooled = output.pooler_output
+        hidden = output.last_hidden_state  
+        mask = attention_mask.unsqueeze(-1).expand(hidden.size()).float()
+        pooled = (hidden * mask).sum(1) / mask.sum(1) 
         return pooled, self.project(pooled)
 
 

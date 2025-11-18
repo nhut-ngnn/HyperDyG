@@ -5,22 +5,21 @@ import os
 PKL_DIR = "metadata"
 OUTPUT_DIR = "feature"
 
-#DEFAULT_TEXT_CKPT = "/home/tri.pm/polyp/fptu/MinhNhut/fine_tuning/ViSEC/models/best_phobert_embeddings.pt"
-
-DEFAULT_TEXT_CKPT = "/home/tri.pm/polyp/fptu/MinhNhut/fine_tuning/ESD/models/best_bert_embeddings.pt"
-DEFAULT_AUDIO_CKPT = "/home/tri.pm/polyp/fptu/MinhNhut/fine_tuning/ESD/models/best_wavlm_embeddings.pt"
+# Fine-tuned checkpoints for IEMOCAP/ESD can be provided via env vars when available.
+DEFAULT_TEXT_CKPT = None
+DEFAULT_AUDIO_CKPT = None
 
 TEXT_CKPT_PATH = os.getenv("TEXT_CKPT_PATH", DEFAULT_TEXT_CKPT)
 AUDIO_CKPT_PATH = os.getenv("AUDIO_CKPT_PATH", DEFAULT_AUDIO_CKPT)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#TOKENIZER = AutoTokenizer.from_pretrained("vinai/phobert-large")
-TOKENIZER = BertTokenizer.from_pretrained('bert-large-uncased')
-AUDIO_PROCESSOR = AutoFeatureExtractor.from_pretrained("microsoft/wavlm-large")
+#TOKENIZER = AutoTokenizer.from_pretrained("vinai/phobert-base")
+TOKENIZER = BertTokenizer.from_pretrained('bert-base-uncased')
+AUDIO_PROCESSOR = AutoFeatureExtractor.from_pretrained("microsoft/wavlm-base")
 
-TEXT_MODEL = PhoBERTEmbeddingModel(embedding_dim=1024, projection_dim=512).to(device)
-AUDIO_MODEL = WavLMEmbeddingModel(embedding_dim=1024, projection_dim=512).to(device)
+TEXT_MODEL = PhoBERTEmbeddingModel(embedding_dim=768, projection_dim=512).to(device)
+AUDIO_MODEL = WavLMEmbeddingModel(embedding_dim=768, projection_dim=512).to(device)
 
 
 def _load_checkpoint(model, path, description):

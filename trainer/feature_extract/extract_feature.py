@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 import torch
 import soundfile as sf
+import librosa
 from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
@@ -19,14 +20,22 @@ from src.feature_extract.config import (
 )
 
 
+
 def _load_audio(audio_path):
     array, sr = sf.read(audio_path)
+
     if isinstance(array, np.ndarray):
         waveform = array.astype(np.float32)
     else:
         waveform = np.array(array, dtype=np.float32)
+
     if waveform.ndim > 1:
         waveform = waveform.mean(axis=1)
+
+    if sr != 16000:
+        waveform = librosa.resample(waveform, orig_sr=sr, target_sr=16000)
+        sr = 16000
+
     return np.ascontiguousarray(waveform), sr
 
 
@@ -165,7 +174,7 @@ def main():
         "--dataset",
         type=str,
         required=True,
-        choices=["IEMOCAP", "ViSEC", "ESD", "ESD_MANDARIN"],
+        choices=["IEMOCAP", "ESD"],
         help="Dataset to process",
     )
     parser.add_argument("--pseudo", action="store_true", help="Flag to process dataset as pseudo-labeled")
@@ -184,13 +193,6 @@ def main():
             ("val",   f"{pkl_prefix}_preprocessed/val.pkl",   f"{pkl_prefix}_BERT_WavLM_val.pkl", False),
             ("test",  f"{pkl_prefix}_preprocessed/test.pkl",  f"{pkl_prefix}_BERT_WavLM_test.pkl", False),
         ]
-    elif args.dataset == "ViSEC":
-        pkl_prefix = "ViSEC"
-        datasets = [
-            ("train", f"{pkl_prefix}_preprocessed/train.pkl", f"{pkl_prefix}_BERT_WavLM_train.pkl", False),
-            ("val",   f"{pkl_prefix}_preprocessed/val.pkl",   f"{pkl_prefix}_BERT_WavLM_val.pkl", False),
-            ("test",  f"{pkl_prefix}_preprocessed/test.pkl",  f"{pkl_prefix}_BERT_WavLM_test.pkl", False),
-        ]
     elif args.dataset == "ESD":
         pkl_prefix = "ESD"
         datasets = [
@@ -198,11 +200,8 @@ def main():
             ("val",   f"{pkl_prefix}_preprocessed/val.pkl",   f"{pkl_prefix}_BERT_WavLM_val.pkl", False),
             ("test",  f"{pkl_prefix}_preprocessed/test.pkl",  f"{pkl_prefix}_BERT_WavLM_test.pkl", False),
         ]
-    elif args.dataset == "ESD_MANDARIN":
-        pkl_prefix = "ESD_mandarin"
-        datasets = [
-            ("test", f"{pkl_prefix}_preprocessed/test.pkl", f"{pkl_prefix}_WavLM_test.pkl", True),
-        ]
+    else:
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     for split_name, pkl_file, output_file, skip_text in datasets:
         print(f"\n{'='*50}")

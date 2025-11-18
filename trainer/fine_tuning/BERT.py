@@ -1,100 +1,72 @@
+import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset
-from transformers import BertModel
-import pickle
-import numpy as np
+from torch.utils.data import DataLoader
+from transformers import BertTokenizer, AdamW
+from tqdm import tqdm
+import warnings
+import sys
 
-class BERTEmbeddingModel(nn.Module):
-    def __init__(self, embedding_dim=1024, projection_dim=512):
-        super().__init__()
-        self.bert = BertModel.from_pretrained('bert-large-uncased')
-        self.project = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim),
-            nn.ReLU(),
-            nn.Linear(embedding_dim, projection_dim)
-        )
+warnings.filterwarnings("ignore")
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(ROOT_DIR)
 
-    def forward(self, input_ids, attention_mask):
-        output = self.bert(input_ids, attention_mask=attention_mask)
-        pooled = output.pooler_output
-        return pooled, self.project(pooled)
+from src.fine_tuning.BERT import BERTEmbeddingModel, NTXentLoss, TextDataset
+from src.fine_tuning.config import BERT_CONFIG
 
 
-class NTXentLoss(nn.Module):
-    def __init__(self, temperature=0.07):
-        super().__init__()
-        self.temperature = temperature
+def train_bert_finetune():
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
-    def forward(self, z1, z2):
-        z1 = F.normalize(z1, dim=1)
-        z2 = F.normalize(z2, dim=1)
-        N = z1.size(0)
-        z = torch.cat([z1, z2], dim=0)
-        sim = torch.mm(z, z.t()) / self.temperature
-        mask = torch.eye(2*N, dtype=torch.bool).to(sim.device)
-        sim.masked_fill_(mask, -float('inf'))
-        targets = torch.cat([torch.arange(N) + N, torch.arange(N)]).to(sim.device)
-        return F.cross_entropy(sim, targets)
+    dataset = TextDataset(BERT_CONFIG["pkl_path"], tokenizer, max_length=BERT_CONFIG["max_length"])
+    dataloader = DataLoader(dataset, batch_size=BERT_CONFIG["batch_size"], shuffle=True, num_workers=4)
 
-class TextDataset(Dataset):
-    def __init__(self, pkl_path, tokenizer, max_length=128):
-        with open(pkl_path, 'rb') as f:
-            self.data = pickle.load(f)
-        self.tokenizer = tokenizer
-        self.max_length = max_length
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = BERTEmbeddingModel(BERT_CONFIG["embedding_dim"], BERT_CONFIG["projection_dim"]).to(device)
+    optimizer = AdamW(model.parameters(), lr=BERT_CONFIG["lr"])
+    criterion = NTXentLoss(BERT_CONFIG["temperature"])
 
-    def __len__(self):
-        return len(self.data)
+    best_loss = float('inf')
+    patience = BERT_CONFIG.get("early_stopping_patience", 5)
+    patience_counter = 0
 
-    def _tokenize(self, text):
-        return self.tokenizer(
-            text,
-            padding='max_length',
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors='pt'
-        )
+    os.makedirs(os.path.dirname(BERT_CONFIG["save_path"]), exist_ok=True)
 
-    def _augment(self, text):
-        words = text.split()
-        if len(words) <= 1:
-            return text
-        keep_prob = 0.85
-        words = [w for w in words if np.random.rand() < keep_prob]
-        return ' '.join(words) if words else text
+    for epoch in range(BERT_CONFIG["epochs"]):
+        model.train()
+        total_loss = 0
 
-    def __getitem__(self, idx):
-        item = self.data[idx]
+        for batch in tqdm(dataloader, desc=f"Epoch {epoch+1}/{BERT_CONFIG['epochs']}"):
+            input_ids1 = batch['input_ids1'].to(device)
+            attention_mask1 = batch['attention_mask1'].to(device)
+            input_ids2 = batch['input_ids2'].to(device)
+            attention_mask2 = batch['attention_mask2'].to(device)
 
-        if isinstance(item, dict):
-            text = item.get('text')
-            if text is None:
-                for key in ('transcript', 'utterance', 'sentence'):
-                    text = item.get(key)
-                    if text:
-                        break
-            if text is None:
-                raise KeyError(
-                    'Text field not found in metadata entry. Available keys: '
-                    + ', '.join(item.keys())
-                )
+            _, z1 = model(input_ids1, attention_mask1)
+            _, z2 = model(input_ids2, attention_mask2)
+
+            loss = criterion(z1, z2)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1} | Avg Loss: {avg_loss:.4f}")
+
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            patience_counter = 0
+            torch.save({'model_state_dict': model.state_dict()}, BERT_CONFIG["save_path"])
+            print(f"Saved best model to {BERT_CONFIG['save_path']}")
         else:
-            try:
-                text = item[1]
-            except (TypeError, IndexError):
-                raise ValueError('Unsupported metadata format for text sample: expected dict or sequence.')
+            patience_counter += 1
+            print(f"No improvement in loss. Patience counter: {patience_counter}/{patience}")
+            if patience_counter >= patience:
+                print("Early stopping triggered.")
+                break
 
-        aug1 = self._augment(text)
-        aug2 = self._augment(text)
+    print("BERT fine-tuning completed.")
 
-        enc1 = self._tokenize(aug1)
-        enc2 = self._tokenize(aug2)
 
-        return {
-            'input_ids1': enc1['input_ids'].squeeze(),
-            'attention_mask1': enc1['attention_mask'].squeeze(),
-            'input_ids2': enc2['input_ids'].squeeze(),
-            'attention_mask2': enc2['attention_mask'].squeeze(),
-        }
+if __name__ == "__main__":
+    train_bert_finetune()

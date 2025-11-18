@@ -1,1 +1,0 @@
-Embedding model will save in here

@@ -203,21 +203,13 @@ def preprocess_esd(args):
     )
 
 
-def preprocess_esd_mandarin(args):
-    _preprocess_esd_language(
-        args=args,
-        speaker_ids=range(1, 11),
-        desc_label="Processing ESD Mandarin",
-        output_subdir="ESD_mandarin_preprocessed",
-    )
-
-
+    
 def arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--dataset",
         type=str,
-        choices=["iemocap", "esd", "esd_mandarin"],
+        choices=["iemocap", "esd"],
         required=True,
     )
     parser.add_argument("--data_root", type=str, required=True, help="Root path to dataset")
@@ -225,11 +217,10 @@ def arg_parser():
     parser.add_argument("--ignore_length", type=int, default=0)
     return parser.parse_args()
 
+
 if __name__ == "__main__":
     args = arg_parser()
     if args.dataset == "iemocap":
         preprocess_iemocap(args)
     elif args.dataset == "esd":
         preprocess_esd(args)
-    elif args.dataset == "esd_mandarin":
-        preprocess_esd_mandarin(args)

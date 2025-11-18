@@ -47,13 +47,13 @@ def parse_args():
         "--dataset",
         type=str,
         required=True,
-        choices=["IEMOCAP", "ESD", "ViSEC"],
+        choices=["IEMOCAP", "ESD"],
         help="Dataset to process.",
     )
     parser.add_argument(
         "--wav-base",
         type=str,
-        default="/home/minhnhutngnn/ViSEC_train_wavs",
+        default=None,
         help="Directory containing wav files referenced in the metadata.",
     )
     parser.add_argument(
@@ -402,7 +402,7 @@ def main():
     elif args.dataset == "ESD":
         pkl_prefix = "ESD"
     else:
-        pkl_prefix = "ViSEC"
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     test_pkl = os.path.join(PKL_DIR, f"{pkl_prefix}_preprocessed/test.pkl")
     if not os.path.isfile(test_pkl):

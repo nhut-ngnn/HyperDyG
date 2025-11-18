@@ -1,7 +1,43 @@
+# HyperDyG: Hypergraph-Driven Dynamic Fusion for Semi-Supervised Multimodal Emotion Recognition
+<i>
+  Official code repository for the manuscript 
+  <b>"HyperDyG: Hypergraph-Driven Dynamic Fusion for Semi-Supervised Multimodal Emotion Recognition"</b>, 
+  submitted at 
+  <a href="https://publications.eai.eu/index.php/inis">EAI Endorsed Transactions on Industrial Networks and Intelligent Systems Journal</a>.
+</i>
 
-# HyperDyG: Multimodal Emotion Recognition with Hypergraph Construction and Dynamic Gating Fusion
+> Please press ⭐ button and/or cite papers if you feel helpful.
 
-HyperDyG is a multimodal speech emotion recognition framework that jointly models textual and acoustic cues through hypergraph-based fusion and dynamic gating. The repository provides end-to-end utilities covering feature extraction, supervised and semi-supervised training, fine-tuning, evaluation, and an interactive Streamlit demo for both English and Vietnamese speech.
+<p align="center">
+<img src="https://img.shields.io/github/stars/nhut-ngnn/HyperDyG">
+<img src="https://img.shields.io/github/forks/nhut-ngnn/HyperDyG">
+<img src="https://img.shields.io/github/watchers/nhut-ngnn/HyperDyG">
+</p>
+
+<div align="center">
+
+[![python](https://img.shields.io/badge/-Python_3.8.20-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![pytorch](https://img.shields.io/badge/Torch_2.0.1-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/get-started/locally/)
+[![cuda](https://img.shields.io/badge/-CUDA_11.8-green?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit-archive)
+</div>
+
+<p align="center">
+<img src="https://img.shields.io/badge/Last%20updated%20on-18.11.2025-brightgreen?style=for-the-badge">
+<img src="https://img.shields.io/badge/Written%20by-Nguyen%20Minh%20Nhut-pink?style=for-the-badge"> 
+</p>
+
+
+<div align="center">
+
+[**Highlights**](#highlights) •
+[**Repository Layout**](#repository-layout) •
+[**Quick Start**](#quick-start) •
+[**Training Pipelines**](#training-pipelines) •
+[**References**](#references) •
+[**Citation**](#citation) •
+[**Contact**](#Contact)
+
+</div>
 
 ## Highlights
 - **Multiple backbones**: Train HyperDyG alongside comparative architectures (GloMER, MemoCMT, FleSER) via the same trainer CLI.
@@ -14,7 +50,7 @@ HyperDyG is a multimodal speech emotion recognition framework that jointly model
 
 | Path | Purpose |
 | --- | --- |
-| `features_output/` | Serialized audio/text embeddings for IEMOCAP, ESD, ViSEC, etc. |
+| `features_output/` | Serialized audio/text embeddings for IEMOCAP and ESD. |
 | `script/` | Shell wrappers for preprocessing, feature extraction, fine-tuning, and training. |
 | `src/` | Core model architectures, projection heads, and embedding encoders. |
 | `trainer/` | Training, semi-supervised training, prediction, preprocessing pipelines. |
@@ -57,7 +93,7 @@ The `script/train_semi.sh` wrapper sets up environment variables and then calls 
 
 Both supervised-only and semi-supervised phases compute weighted cross-entropy, track WA/UA/WF1/UF1, and emit per-seed CSV logs in `results/`.
 
-## Evaluation and Prediction
+### Evaluation and Prediction
 
 Use `trainer/predict.py` to evaluate saved checkpoints:
 
@@ -70,49 +106,31 @@ python trainer/predict.py \
 
 Metrics mirror the training stage; results can be exported to CSV or JSON for analysis.
 
-## Feature Extraction and Fine-Tuning
+### Feature Extraction and Fine-Tuning
 
 - **Speech/text encoders**: `src/feature_extract/model_encode.py` defines BERT/PhoBERT and WavLM heads.
 - **Fine-tuning**: Adjust backbone checkpoints via `script/fine_tuning.sh` or modules under `fine_tuning/`.
 - **On-demand embeddings**: `trainer/extract_feature.py` regenerates PKLs from raw audio/transcript pairs.
 
-## Streamlit Demo and ngrok Sharing
+## References
+[1] Nhat Truong Pham, SERVER: Multi-modal Speech Emotion Recognition using Transformer-based and Vision-based Embeddings (ICIIT), 2023. Available https://github.com/nhattruongpham/mmser.git.
 
-The Streamlit app supports browser-based recording, ASR (English Wav2Vec2, Vietnamese PhoWhisper), embedding extraction, and model comparison.
+[2] Mustaqeem Khan, MemoCMT: Cross-Modal Transformer-Based Multimodal Emotion Recognition System (Scientific Reports), 2025. Available https://github.com/tpnam0901/MemoCMT.
 
-### Run locally
-```bash
-source .venv/bin/activate
-streamlit run implement/multimodal_emotion_app.py \
-	--server.port 8501 --server.address 0.0.0.0
-```
+[3] Nhut Minh Nguyen, HemoGAT: Heterogeneous multi-modal emotion recognition with cross-modal transformer and graph attention network, 2025. Available https://github.com/nhut-ngnn/HemoGAT.
 
-### Expose publicly with ngrok
-```bash
-source .venv/bin/activate
-ngrok config add-authtoken YOUR_TOKEN      # once per machine
-ngrok http 8501
-```
-
-Copy the forwarding URL and share it with remote users. The app also includes an in-app “Start ngrok” button (requires `pyngrok`).
-
-Live demo (temporary ngrok tunnel): [https://prewilling-arie-cozily.ngrok-free.dev/](https://prewilling-arie-cozily.ngrok-free.dev/)
+[4] Nhut Minh Nguyen, GloMER: Towards Robust Multimodal Emotion Recognition via Gated Fusion and Contrastive Learning, 2025. Available https://github.com/nhut-ngnn/GloMER.
 
 ## Citation
-If you use this repository, please cite the associated HyperDyG work (update with final bibliographic entry):
-
+If you use this code or part of it, please cite the following papers:
 ```
 ```
-
 ## Contact
-For questions or collaboration requests, reach out to:
+For any information, please contact the main author:
 
-Nhut Minh Nguyen — FPT University, Vietnam
+Nhut Minh Nguyen at FPT University, Vietnam
 
-- **Email:** [minhnhut.ngnn@gmail.com](mailto:minhnhut.ngnn@gmail.com)
-- **ORCID:** [https://orcid.org/0009-0003-1281-5346](https://orcid.org/0009-0003-1281-5346)
-- **GitHub:** [https://github.com/nhut-ngnn](https://github.com/nhut-ngnn)
-
----
-
-© 2025 Nhut Minh Nguyen. Licensed under the terms specified in `LICENSE`.
+**Email:** [minhnhut.ngnn@gmail.com](mailto:minhnhut.ngnn@gmail.com)<br>
+**Website:** [https://nhut-ngnn.github.io/](https://nhut-ngnn.github.io/)<br>
+**ORCID:** <link>https://orcid.org/0009-0003-1281-5346</link> <br>
+**GitHub:** <link>https://github.com/nhut-ngnn/</link>

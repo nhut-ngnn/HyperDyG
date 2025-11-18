@@ -1,98 +1,88 @@
 import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchaudio
-import pickle
-from transformers import WavLMModel
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers import AutoFeatureExtractor
+import warnings
+import sys
 
-class AudioEmbeddingModel(nn.Module):
-    def __init__(self, embedding_dim=1024, projection_dim=512, pretrained_model="microsoft/wavlm-large"):
-        super().__init__()
-        self.wavlm = WavLMModel.from_pretrained(pretrained_model)
-        self.projection = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim),
-            nn.ReLU(),
-            nn.Linear(embedding_dim, projection_dim)
-        )
+warnings.filterwarnings("ignore")
 
-    def forward(self, input_values):
-        outputs = self.wavlm(input_values)
-        pooled = torch.mean(outputs.last_hidden_state, dim=1) 
-        projected = self.projection(pooled)
-        return pooled, projected
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(ROOT_DIR)
 
-class NTXentLoss(nn.Module):
-    def __init__(self, temperature=0.07):
-        super().__init__()
-        self.temperature = temperature
-
-    def forward(self, z1, z2):
-        z1 = F.normalize(z1, dim=1)
-        z2 = F.normalize(z2, dim=1)
-        N = z1.size(0)
-        z_all = torch.cat([z1, z2], dim=0)
-        sim = torch.mm(z_all, z_all.t()) / self.temperature
-        mask = torch.eye(2 * N, dtype=torch.bool).to(sim.device)
-        sim.masked_fill_(mask, -float('inf'))
-        labels = torch.cat([torch.arange(N) + N, torch.arange(N)]).to(sim.device)
-        return F.cross_entropy(sim, labels)
+from src.fine_tuning.WavLM import AudioEmbeddingModel, NTXentLoss, AudioDataset   
+from src.fine_tuning.config import WAV_CONFIG
 
 
-class AudioDataset(Dataset):
-    def __init__(self, pkl_path, processor, segment_length=16000, audio_dir=None):
-        with open(pkl_path, 'rb') as f:
-            self.data = pickle.load(f) 
-        self.processor = processor
-        self.segment_length = segment_length
-        self.audio_dir = audio_dir
+def train_wavlm_finetune():
 
-    def __len__(self):
-        return len(self.data)
+    processor = AutoFeatureExtractor.from_pretrained("microsoft/wavlm-base")
 
-    def _load_audio(self, path):
-        waveform, sr = torchaudio.load(path)
-        if sr != 16000:
-            waveform = torchaudio.transforms.Resample(sr, 16000)(waveform)
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
-        return waveform.squeeze()
+    dataset = AudioDataset(
+        WAV_CONFIG["metadata_path"],
+        processor,
+        WAV_CONFIG["segment_length"],
+        audio_dir=WAV_CONFIG.get("audio_dir")
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=WAV_CONFIG["batch_size"],
+        shuffle=True,
+        num_workers=4
+    )
 
-    def _get_segment(self, waveform):
-        if waveform.size(0) > self.segment_length:
-            start = torch.randint(0, waveform.size(0) - self.segment_length, (1,))
-            waveform = waveform[start:start + self.segment_length]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = AudioEmbeddingModel(
+        embedding_dim=WAV_CONFIG["embedding_dim"],  
+        projection_dim=WAV_CONFIG["projection_dim"]
+    ).to(device)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=WAV_CONFIG["learning_rate"])
+    criterion = NTXentLoss(WAV_CONFIG["temperature"])
+
+    best_loss = float("inf")
+    patience = WAV_CONFIG.get("early_stopping_patience", 5)
+    patience_counter = 0
+
+    os.makedirs(os.path.dirname(WAV_CONFIG["save_path"]), exist_ok=True)
+
+    for epoch in range(WAV_CONFIG["num_epochs"]):
+        model.train()
+        total_loss = 0
+
+        for batch in tqdm(dataloader, desc=f"Epoch {epoch+1}/{WAV_CONFIG['num_epochs']}"):
+            x1 = batch["input_values1"].to(device)
+            x2 = batch["input_values2"].to(device)
+
+            _, z1 = model(x1)
+            _, z2 = model(x2)
+
+            loss = criterion(z1, z2)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1} | Avg Loss: {avg_loss:.4f}")
+
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            patience_counter = 0
+            torch.save({"model_state_dict": model.state_dict()}, WAV_CONFIG["save_path"])
+            print(f"Saved best model to {WAV_CONFIG['save_path']}")
         else:
-            waveform = F.pad(waveform, (0, self.segment_length - waveform.size(0)))
-        return waveform
+            patience_counter += 1
+            print(f"No improvement. Patience counter: {patience_counter}/{patience}")
 
-    def __getitem__(self, idx):
-        item = self.data[idx]
+            if patience_counter >= patience:
+                print("Early stopping triggered.")
+                break
 
-        if isinstance(item, dict):
-            audio_path = item.get("audio_path")
-            if audio_path is None:
-                filename = item.get("filename")
-                if filename is None:
-                    raise KeyError("Metadata entry missing both 'audio_path' and 'filename'.")
-                if self.audio_dir is None:
-                    raise ValueError("audio_dir must be provided when metadata does not contain full audio paths.")
-                audio_path = os.path.join(self.audio_dir, filename)
-        else:
-            try:
-                audio_path = item[0]
-            except (TypeError, IndexError):
-                raise ValueError("Unsupported metadata format for audio sample: expected dict or sequence.")
+    print("WavLM fine-tuning complete.")
 
-        waveform = self._load_audio(audio_path)
-        seg1 = self._get_segment(waveform)
-        seg2 = self._get_segment(waveform)
 
-        proc1 = self.processor(seg1.numpy(), sampling_rate=16000, return_tensors="pt")["input_values"].squeeze()
-        proc2 = self.processor(seg2.numpy(), sampling_rate=16000, return_tensors="pt")["input_values"].squeeze()
-
-        return {
-            "input_values1": proc1,
-            "input_values2": proc2
-        }
+if __name__ == "__main__":
+    train_wavlm_finetune()

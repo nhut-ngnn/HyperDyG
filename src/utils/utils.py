@@ -12,7 +12,6 @@ from scipy.special import softmax
 from torch.utils.data import DataLoader
 import time
 from thop import profile
-import argparse
 from fvcore.nn import FlopCountAnalysis, parameter_count
 import torch.nn.functional as F
 
@@ -115,10 +114,9 @@ def plot_and_save_roc(labels, probs, num_classes, save_path):
 
 def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
                        optimizer, scheduler, criterion_fn,
-                       epochs=100, save_path="best_model.pt", seed=None,alpha=None,
-                       batch_size=64, log_context=None,dataset=None,
-                       unlabeled_dataset=None, unlabeled_cfg=None,model_type=None,
-                       supervised_aug_cfg=None):
+                       epochs=100, save_path="best_model.pt", seed=None,
+                       batch_size=64, log_context=None,
+                       unlabeled_dataset=None, unlabeled_cfg=None):
 
     num_classes = getattr(model, "num_classes", None)
     if num_classes is None:
@@ -172,7 +170,7 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
         base_config[key] = value
 
     consistency_cfg = unlabeled_cfg or {}
-    consistency_weight = float(consistency_cfg.get("consistency_weight", 1.0))
+    pseudo_weight = float(consistency_cfg.get("pseudo_weight", 1.0))
     pseudo_threshold = float(consistency_cfg.get("pseudo_threshold", 0.9))
     weak_cfg = {
         "word_dropout": consistency_cfg.get("weak_word_dropout", 0.1),
@@ -188,21 +186,9 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
     max_unlabeled_batches = consistency_cfg.get("max_unlabeled_batches")
     apply_consistency = unlabeled_dataset is not None and len(unlabeled_dataset) > 0
 
-    supervised_aug_cfg = supervised_aug_cfg or {}
-    apply_supervised_aug = bool(supervised_aug_cfg.get("enabled", False))
-    supervised_aug_params = {
-        "word_dropout": supervised_aug_cfg.get("word_dropout", 0.0),
-        "audio_noise_std": supervised_aug_cfg.get("audio_noise_std", 0.0),
-        "text_noise_std": supervised_aug_cfg.get("text_noise_std", 0.0)
-    }
-    supervised_consistency_weight = (
-        float(supervised_aug_cfg.get("consistency_weight", 0.0)) if apply_supervised_aug else 0.0
-    )
-    use_supervised_consistency = apply_supervised_aug and supervised_consistency_weight > 0.0
-
     if apply_consistency:
         base_config.update({
-            "consistency_weight": consistency_weight,
+            "pseudo_weight": pseudo_weight,
             "pseudo_threshold": pseudo_threshold,
             "weak_word_dropout": weak_cfg["word_dropout"],
             "strong_word_dropout": strong_cfg["word_dropout"],
@@ -212,14 +198,6 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
             "strong_text_noise_std": strong_cfg["text_noise_std"],
             "unlabeled_batch_size": unlabeled_batch_size
         })
-    if apply_supervised_aug:
-        base_config.update({
-            "supervised_word_dropout": supervised_aug_params["word_dropout"],
-            "supervised_audio_noise_std": supervised_aug_params["audio_noise_std"],
-            "supervised_text_noise_std": supervised_aug_params["text_noise_std"]
-        })
-        if use_supervised_consistency:
-            base_config["supervised_consistency_weight"] = supervised_consistency_weight
 
     tags = log_context.get("tags", [])
     if isinstance(tags, str):
@@ -235,7 +213,7 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
     tags = list(dict.fromkeys(auto_tags + list(tags)))
 
     init_kwargs = {
-        "project": log_context.get("project", f"{model_type}-EmotionRecognition-{dataset_name}"),
+        "project": log_context.get("project", "HyperDyG-EmotionRecognition-{dataset_name}"),
         "name": run_display_name,
         "group": log_context.get("group"),
         "job_type": stage,
@@ -279,10 +257,9 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
             total_train_loss = 0.0
             total_train_weight = 0.0
             total_train_classification = 0.0
-            total_unlabeled_consistency_loss = 0.0
-            total_unlabeled_consistency_weighted = 0.0
-            total_supervised_consistency_loss = 0.0
-            total_supervised_weight = 0.0
+            total_unlabeled_semi_loss = 0.0
+            total_unlabeled_semi_loss_raw = 0.0
+            total_unlabeled_semi_weight = 0.0
             total_unlabeled_seen = 0.0
             total_unlabeled_accepted = 0.0
 
@@ -299,21 +276,10 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
 
                 optimizer.zero_grad()
                 outputs = model(text_x, audio_x, return_all=True)
-                supervised_consistency = torch.tensor(0.0, device=device)
-                if apply_supervised_aug:
-                    aug_text, aug_audio = augment_modalities(text_x, audio_x, supervised_aug_params)
-                    aug_outputs = model(aug_text, aug_audio, return_all=True)
-                    supervised_loss = criterion_fn(outputs, y, confidences)
-                    augmented_loss = criterion_fn(aug_outputs, y, confidences)
-                    classification_loss = 0.5 * (supervised_loss + augmented_loss)
-                    if use_supervised_consistency:
-                        base_probs = torch.softmax(outputs["logits"], dim=1)
-                        aug_probs = torch.softmax(aug_outputs["logits"], dim=1)
-                        supervised_consistency = F.mse_loss(base_probs, aug_probs)
-                else:
-                    classification_loss = criterion_fn(outputs, y, confidences)
+                classification_loss = criterion_fn(outputs, y, confidences)
 
-                unlabeled_consistency_loss = torch.tensor(0.0, device=device)
+                unlabeled_semi_loss = torch.tensor(0.0, device=device)
+                pseudo_ce_loss = torch.tensor(0.0, device=device)
                 selected_count = 0
 
                 if apply_consistency and (max_unlabeled_batches is None or unlabeled_batches_processed < max_unlabeled_batches):
@@ -357,45 +323,39 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
                         combined_loss = 0.5 * (strong_loss + orig_loss)
 
                         weights = selected_conf.float()
-                        unlabeled_consistency_loss = (combined_loss * weights).sum() / (weights.sum() + 1e-8)
+                        pseudo_ce_loss = (combined_loss * weights).sum() / (weights.sum() + 1e-8)
+                        unlabeled_semi_loss = pseudo_ce_loss
 
                 loss = classification_loss
-                if use_supervised_consistency:
-                    loss = loss + supervised_consistency_weight * supervised_consistency
                 if apply_consistency:
-                    loss = loss + consistency_weight * unlabeled_consistency_loss
+                    loss = loss + pseudo_weight * unlabeled_semi_loss
                 loss.backward()
                 optimizer.step()
 
                 total_train_loss += loss.item() * batch_size_value
                 total_train_classification += classification_loss.item() * batch_size_value
                 total_train_weight += batch_size_value
-                if use_supervised_consistency:
-                    total_supervised_consistency_loss += supervised_consistency.item() * batch_size_value
-                    total_supervised_weight += batch_size_value
                 if apply_consistency and selected_count > 0:
-                    total_unlabeled_consistency_loss += unlabeled_consistency_loss.item() * float(selected_count)
-                    total_unlabeled_consistency_weighted += float(selected_count)
+                    total_unlabeled_semi_loss += unlabeled_semi_loss.item() * float(selected_count)
+                    total_unlabeled_semi_loss_raw += pseudo_ce_loss.item() * float(selected_count)
+                    total_unlabeled_semi_weight += float(selected_count)
 
             avg_train_loss = total_train_loss / max(total_train_weight, 1e-8)
             avg_train_cls = total_train_classification / max(total_train_weight, 1e-8)
             if apply_consistency:
                 avg_consistency = (
-                    total_unlabeled_consistency_loss / max(total_unlabeled_consistency_weighted, 1e-8)
-                    if total_unlabeled_consistency_weighted > 0 else 0.0
+                    total_unlabeled_semi_loss / max(total_unlabeled_semi_weight, 1e-8)
+                    if total_unlabeled_semi_weight > 0 else 0.0
+                )
+                avg_semi_loss_raw = (
+                    total_unlabeled_semi_loss_raw / max(total_unlabeled_semi_weight, 1e-8)
+                    if total_unlabeled_semi_weight > 0 else 0.0
                 )
                 accept_rate = total_unlabeled_accepted / max(total_unlabeled_seen, 1e-8) if total_unlabeled_seen > 0 else 0.0
             else:
                 avg_consistency = None
+                avg_semi_loss_raw = None
                 accept_rate = None
-            if use_supervised_consistency:
-                avg_supervised_consistency = (
-                    total_supervised_consistency_loss / max(total_supervised_weight, 1e-8)
-                    if total_supervised_weight > 0 else 0.0
-                )
-            else:
-                avg_supervised_consistency = None
-
             model.eval()
             val_losses, val_preds, val_labels = [], [], []
             total_val_weight = 0.0
@@ -419,7 +379,7 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
 
             scheduler.step(avg_val_loss)
 
-            wandb.log({
+            log_payload = {
                 "train_loss": avg_train_loss,
                 "train_classification_loss": avg_train_cls,
                 "val_loss": avg_val_loss,
@@ -429,17 +389,17 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
                 "val_UF1": uf1,
                 "epoch": epoch + 1,
                 "stage": stage,
-                "seed": seed_value,
-                **({
+                "seed": seed_value
+            }
+            if apply_consistency:
+                log_payload.update({
                     "train_consistency_loss": avg_consistency,
+                    "train_semi_loss_raw": avg_semi_loss_raw,
                     "pseudo_accept_rate": accept_rate,
-                    "consistency_weight": consistency_weight
-                } if apply_consistency else {}),
-                **({
-                    "train_supervised_consistency_loss": avg_supervised_consistency,
-                    "supervised_consistency_weight": supervised_consistency_weight
-                } if use_supervised_consistency else {})
-            })
+                    "pseudo_weight": pseudo_weight
+                })
+
+            wandb.log(log_payload)
 
             wa_for_save, ua_for_save = wa, ua
 
@@ -503,9 +463,8 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
         for key in (
             "labeled_samples", "pseudo_selected", "pseudo_available",
             "pseudo_utilized_ratio", "pseudo_enabled", "pseudo_threshold",
-            "max_pseudo_ratio", "pseudo_weight", "unlabeled_ratio", "split_seed",
-            "use_augmentation", "supervised_strong_aug",
-            "combined_train_samples"
+            "unlabeled_ratio", "split_seed",
+            "use_augmentation", "combined_train_samples"
         ):
             value = log_context.get(key)
             if value is not None:
