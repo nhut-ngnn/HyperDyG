@@ -20,6 +20,7 @@ class HyperDyG(nn.Module):
         dropout=0.3,
         linear_layer_dims=[512, 256],
         num_classes=4,
+        cross_attn_blocks=1,
         hypergraph_k_text=5,
         hypergraph_k_audio=5,
         hypergraph_threshold=0.5,
@@ -46,7 +47,12 @@ class HyperDyG(nn.Module):
         )
 
         self.encoders = CrossModalEncoders(
-            text_input_dim, audio_input_dim, fusion_dim, dropout, num_heads
+            text_input_dim,
+            audio_input_dim,
+            fusion_dim,
+            dropout,
+            num_heads,
+            num_blocks=cross_attn_blocks,
         )
 
         self.hypergraph = DualHypergraphModule(

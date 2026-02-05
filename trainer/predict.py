@@ -136,6 +136,12 @@ def parse_args():
     parser.add_argument("--save_dir", type=str, default="logs", help="Directory to save outputs")
     parser.add_argument("--modality", type=str, choices=["both", "text", "audio"], default="both", help="Modality to predict with")
     parser.add_argument(
+        "--cross_attn_blocks",
+        type=int,
+        default=1,
+        help="Number of cross-attention blocks (>= 1).",
+    )
+    parser.add_argument(
         "--noise_dir",
         type=str,
         default=None,
@@ -281,7 +287,8 @@ def main():
         num_heads=4,
         dropout=0.5,
         linear_layer_dims=[512, 256],
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        cross_attn_blocks=args.cross_attn_blocks,
     ).to(device)
     model.load_state_dict(torch.load(args.model_path, map_location=device))
     model.eval()

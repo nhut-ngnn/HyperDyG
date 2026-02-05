@@ -406,7 +406,10 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
             if ua_for_save > best_val_ua or avg_val_loss < best_val_loss:
                 best_val_ua = ua_for_save
                 best_val_loss = avg_val_loss
-                torch.save(model.state_dict(), save_path)
+                # Atomic save to avoid partial checkpoints
+                tmp_save_path = save_path + ".tmp"
+                torch.save(model.state_dict(), tmp_save_path)
+                os.replace(tmp_save_path, save_path)
                 print(
                     f"\nSaved best model at epoch {epoch + 1} with "
                     f"WA = {wa_for_save:.4f}, UA = {ua_for_save:.4f}, Val Loss = {avg_val_loss:.4f}"
@@ -422,7 +425,10 @@ def train_and_evaluate(model, train_dataset, valid_dataset, test_dataset,
             )
 
         if os.path.exists(save_path):
-            model.load_state_dict(torch.load(save_path))
+            try:
+                model.load_state_dict(torch.load(save_path, map_location=device))
+            except Exception as e:
+                print(f"[WARN] Failed to load checkpoint {save_path}: {e}. Using current model weights.")
 
         model.eval()
         test_preds, test_labels, test_logits_list = [], [], []

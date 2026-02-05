@@ -10,15 +10,15 @@ SUP_EPOCHS=30
 SEMI_EPOCHS=50
 
 PSEUDO_THRESHOLD=0.95
-UNLABELED_RATIO=0.7
+UNLABELED_RATIO=0.0
 CONSISTENCY_WEIGHT=0.1
 
-THRESHOLDS=(0.98 1.00)
+THRESHOLDS=0.96
 
 for THRESHOLD in "${THRESHOLDS[@]}"; do
   printf '\n=== Running training with PSEUDO WEIGHT THRESHOLD=%s ===\n' "$THRESHOLD"
   SANITIZED_THRESHOLD=${THRESHOLD/./p}
-  OUTPUT_SUFFIX="0p7/${DATASET}_${NUM_CLASSES}class_thresh${SANITIZED_THRESHOLD}"
+  OUTPUT_SUFFIX="1p0/${DATASET}_${NUM_CLASSES}class_thresh${SANITIZED_THRESHOLD}"
 
   cmd=(
     python3 trainer/train.py
@@ -32,6 +32,7 @@ for THRESHOLD in "${THRESHOLDS[@]}"; do
     --unlabeled_ratio "$UNLABELED_RATIO"
     --pseudo_weight 0.3
     --results_suffix "$OUTPUT_SUFFIX"
+    --cross_attn_blocks 5
   )
 
   if (($#)); then

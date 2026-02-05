@@ -192,6 +192,12 @@ def parse_args():
                         help="Gaussian noise std for text during strong augmentation.")
     parser.add_argument("--unlabeled_batch_size", type=int, default=None,
                         help="Batch size for the unlabeled data loader. Defaults to --batch_size.")
+    parser.add_argument(
+        "--cross_attn_blocks",
+        type=int,
+        default=1,
+        help="Number of cross-attention blocks (>= 1).",
+    )
 
 
     return parser.parse_args()
@@ -261,6 +267,7 @@ def main():
             dropout=0.3,
             linear_layer_dims=[512, 256],
             num_classes=args.num_classes,
+            cross_attn_blocks=args.cross_attn_blocks,
             use_rgcn=True,
             use_gtr=True
         ).to(device)
@@ -280,7 +287,7 @@ def main():
         loss_fn = lambda out, y, conf: combined_loss(out, y, ce_loss_fn, confidences=conf)
 
         optimizer = AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=8, verbose=True)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=8)
 
         save_path_supervised = (
             f"saved_model/{args.dataset}_{args.num_classes}class_{ratio_name_component}_HyperDyG_seed{seed}.pt"
